@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <title>Check-In</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-stone-50 font-sans p-8">
+<div class="max-w-3xl mx-auto bg-white rounded-xl shadow p-8">
+    <h1 class="text-2xl font-bold text-cyan-800 mb-1 border-b pb-4">Check-In Bagaglio</h1>
+    <p class="text-xs text-slate-400 font-mono mb-6">
+        32 bit — W0[15:12]=volo W0[11:8]=op W0[7:6]=pipeline W0[5:3]=flag | W1=paxID
+    </p>
+
+    <div class="grid grid-cols-2 gap-8">
+        <div class="space-y-4">
+            <!-- Volo -->
+            <div>
+                <label class="block text-sm font-bold text-gray-700">
+                    Volo <span class="text-gray-400 font-normal">(4 bit → indice 0-15)</span>
+                </label>
+                <select id="selVolo" class="mt-1 w-full rounded border border-gray-300 p-2 font-mono"></select>
+            </div>
+            <!-- Operatore -->
+            <div>
+                <label class="block text-sm font-bold text-gray-700">
+                    Operatore <span class="text-gray-400 font-normal">(4 bit → indice 0-15)</span>
+                </label>
+                <select id="selOp" class="mt-1 w-full rounded border border-gray-300 p-2 font-mono"></select>
+            </div>
+            <!-- Passeggero -->
+            <div class="bg-slate-50 rounded-lg p-4 border space-y-3">
+                <p class="text-sm font-bold text-gray-700">
+                    Passeggero <span class="text-gray-400 font-normal">(16 bit ID → lookup.json)</span>
+                </p>
+                <input id="inPaxId"   type="number" placeholder="ID (0-65535)" min="0" max="65535"
+                    class="w-full rounded border border-gray-300 p-2 font-mono text-sm">
+                <input id="inNome"    type="text"   placeholder="Nome Cognome"
+                    class="w-full rounded border border-gray-300 p-2 text-sm uppercase">
+                <input id="inTel"     type="text"   placeholder="Telefono"
+                    class="w-full rounded border border-gray-300 p-2 font-mono text-sm">
+                <p class="text-xs text-slate-400">
+                    Se l'ID non esiste nel lookup, verrà registrato automaticamente alla scrittura.
+                </p>
+            </div>
+            <button id="btnScrivi"
+                class="w-full bg-cyan-700 text-white font-bold py-3 rounded hover:bg-cyan-800">
+                SCRIVI TAG (32 bit)
+            </button>
+        </div>
+
+        <!-- Debug -->
+        <div class="bg-slate-900 rounded-lg p-4 text-emerald-400 font-mono text-xs leading-loose">
+            <p class="text-slate-400 text-xs mb-3">Encoding in tempo reale</p>
+            <p>Payload: <span id="dbgHex" class="text-white text-base font-bold"></span></p>
+            <hr class="border-slate-700 my-2">
+            <p>W0 = <span id="dbgW0" class="text-white"></span></p>
+            <p class="text-slate-500 pl-2">
+                [15:12] volo  = <span id="dbgVIdx" class="text-emerald-300"></span><br>
+                [11:8]  op    = <span id="dbgOIdx" class="text-emerald-300"></span><br>
+                [7:6]   pipe  = <span id="dbgPipe" class="text-emerald-300"></span> (01=checkin)<br>
+                [5:3]   flags = <span id="dbgFlg"  class="text-emerald-300"></span>
+            </p>
+            <p class="mt-2">W1 = <span id="dbgW1" class="text-white"></span></p>
+            <p class="text-slate-500 pl-2">[15:0] paxID = <span id="dbgPaxId" class="text-emerald-300"></span></p>
+        </div>
+    </div>
+</div>
+
+<script>
+let lookup = { voli: [], operatori: [], passeggeri: {} };
+let currentHex = "00000000";
+
+// Carica lookup dal server
+fetch('http://localhost:8080/tag-data')
+    .then(r => r.json())
+    .then(data => {
+        lookup = data.lookup;
+        populateSelects();
+        updatePreview();
+    }).catch(() => { populateSelects(); updatePreview(); });
+
+function populateSelects() {
+    const sv = document.getElementById('selVolo');
+    const so = document.getElementById('selOp');
+    sv.innerHTML = '';
+    so.innerHTML = '';
+    lookup.voli.forEach((v, i) => {
+        sv.innerHTML += `<option value="${i}">${i.toString().padStart(2,'0')} — ${v}</option>`;
+    });
+    lookup.operatori.forEach((o, i) => {
+        so.innerHTML += `<option value="${i}">${i.toString().padStart(2,'0')} — ${o}</option>`;
+    });
+}
+
+function updatePreview() {
+    const voloIdx = parseInt(document.getElementById('selVolo').value) || 0;
+    const opIdx   = parseInt(document.getElementById('selOp').value)   || 0;
+    const paxId   = Math.min(65535, Math.max(0, parseInt(document.getElementById('inPaxId').value) || 0));
+    const pipeline = 1; // checkin = 01
+
+    const w0 = ((voloIdx & 0xF) << 12) | ((opIdx & 0xF) << 8) | ((pipeline & 0x3) << 6);
+    const w1 = paxId & 0xFFFF;
+    const w0h = w0.toString(16).padStart(4,'0').toUpperCase();
+    const w1h = w1.toString(16).padStart(4,'0').toUpperCase();
+    currentHex = w0h + w1h;
+
+    document.getElementById('dbgHex').textContent  = currentHex;
+    document.getElementById('dbgW0').textContent   = w0h + ' = ' + w0.toString(2).padStart(16,'0');
+    document.getElementById('dbgVIdx').textContent = voloIdx + ' ('+lookup.voli[voloIdx]+')';
+    document.getElementById('dbgOIdx').textContent = opIdx + ' ('+lookup.operatori[opIdx]+')';
+    document.getElementById('dbgPipe').textContent = pipeline.toString(2).padStart(2,'0');
+    document.getElementById('dbgFlg').textContent  = '000';
+    document.getElementById('dbgW1').textContent   = w1h + ' = ' + w1.toString(2).padStart(16,'0');
+    document.getElementById('dbgPaxId').textContent = paxId;
+}
+
+['selVolo','selOp','inPaxId','inNome','inTel'].forEach(id =>
+    document.getElementById(id).addEventListener('input', updatePreview));
+
+document.getElementById('btnScrivi').addEventListener('click', () => {
+    const paxId = Math.min(65535, parseInt(document.getElementById('inPaxId').value) || 0);
+    const nome  = document.getElementById('inNome').value.trim().toUpperCase();
+    const tel   = document.getElementById('inTel').value.trim();
+
+    const body = { hexPayload: currentHex };
+    if (nome) body.newPax = { id: paxId, nome, tel };
+
+    fetch('http://localhost:8080', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+    }).then(r => r.ok ? alert('Tag scritto! PaxID: '+paxId) : alert('Errore HTTP '+r.status));
+});
+</script>
+</body>
+</html>
